@@ -25,6 +25,8 @@ public class BrewMonsterUnlitShaderGUI : ShaderGUI
     private MaterialProperty shadowStrengthProp;
     private MaterialProperty billboardProp;
     private MaterialProperty billboardPivotProp;
+    private MaterialProperty billboardPivotTexProp;
+    private MaterialProperty billboardNormalTexProp;
     private MaterialProperty surfaceProp;
     private MaterialProperty renderTypeProp;
     private MaterialProperty srcBlendProp;
@@ -41,7 +43,9 @@ public class BrewMonsterUnlitShaderGUI : ShaderGUI
     private static readonly GUIContent billboardOptionsLabel = new GUIContent("Billboard");
     private static readonly GUIContent billboardLabel = new GUIContent("Face Camera", "Turn this mesh around its pivot so it faces the camera, Y axis kept upright. These materials render the back face, so the mesh's BACK side is the one aimed at the camera; flip facingSign in the shader's vert to aim the front side instead. Off by default - without it every vertex keeps its authored transform. Drives the _BILLBOARD_ON keyword, so the billboard is compiled out of the vertex shader when it is off.");
     private static readonly GUIContent advancedBlendLabel = new GUIContent("Advanced Blend", "Raw blend state, normally written by the Surface Type popup. Change it only when you need a blend setup that popup does not cover.");
-    private static readonly GUIContent billboardPivotLabel = new GUIContent("Pivot Per Quad/Triangle", "Rotate every vertex around the centre of its own quad/triangle instead of around the mesh origin - for meshes that are a set of leaf cards, a tree canopy for instance. The centres come from _BillboardPivotBuffer, which only BillboardPivotBinder binds, so leave this off unless that component is on the object: an unbound buffer reads as garbage. Needs shader model 4.5 (SV_VertexID + StructuredBuffer). Drives the _BILLBOARD_PER_VERTEX_PIVOT keyword.");
+    private static readonly GUIContent billboardPivotLabel = new GUIContent("Pivot Per Quad/Triangle", "Rotate every vertex around the centre of its own quad/triangle instead of around the mesh origin - for meshes that are a set of leaf cards, a tree canopy for instance. The centres and plane normals come from the baked textures below; with none assigned the pivots read as zero and the billboard falls back to the mesh origin. Needs shader model 4.5 (SV_VertexID + vertex texture fetch). Drives the _BILLBOARD_PER_VERTEX_PIVOT keyword.");
+    private static readonly GUIContent billboardPivotTexLabel = new GUIContent("Quad Pivot (baked)", "Object-space centre of the quad each vertex belongs to - one texel per vertex, addressed by SV_VertexID. Written next to the prefab by Tools > BrewMonster > Bake Billboard Quad Data; a hand-assigned texture will not line up.");
+    private static readonly GUIContent billboardNormalTexLabel = new GUIContent("Quad Normal (baked)", "Object-space plane normal of that same quad, one texel per vertex. Written by the billboard data baker together with the pivot texture.");
     private static readonly string[] surfaceNames = Enum.GetNames(typeof(SurfaceType));
 
     // Editor state
@@ -66,6 +70,8 @@ public class BrewMonsterUnlitShaderGUI : ShaderGUI
         shadowStrengthProp = FindProperty("_ShadowStrength", properties);
         billboardProp = FindProperty("_Billboard", properties);
         billboardPivotProp = FindProperty("_BillboardPivot", properties);
+        billboardPivotTexProp = FindProperty("_BillboardPivotTex", properties);
+        billboardNormalTexProp = FindProperty("_BillboardNormalTex", properties);
         surfaceProp = FindProperty("_Surface", properties);
         renderTypeProp = FindProperty("_RenderType", properties);
         srcBlendProp = FindProperty("_SrcBlend", properties);
@@ -97,6 +103,8 @@ public class BrewMonsterUnlitShaderGUI : ShaderGUI
         EditorGUILayout.LabelField(billboardOptionsLabel, EditorStyles.boldLabel);
         materialEditor.ShaderProperty(billboardProp, billboardLabel);
         materialEditor.ShaderProperty(billboardPivotProp, billboardPivotLabel);
+        materialEditor.TexturePropertySingleLine(billboardPivotTexLabel, billboardPivotTexProp);
+        materialEditor.TexturePropertySingleLine(billboardNormalTexLabel, billboardNormalTexProp);
 
         EditorGUILayout.Space();
         materialEditor.RenderQueueField();

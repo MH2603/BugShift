@@ -15,11 +15,19 @@ Shader "BrewMonster/UnlitWithShadows"
         // compiles it away instead of branching at runtime.
         [Toggle(_BILLBOARD_ON)] _Billboard ("Billboard (face camera)", Float) = 0
 
-        // Where the billboard rotates from. Off: the whole mesh turns around its object origin. On:
-        // every vertex turns around the centre of its own quad/triangle, read from
-        // _BillboardPivotBuffer - which only a renderer carrying BillboardPivotBinder binds. Leave it
-        // off unless that component sits on the object: an unbound buffer reads as garbage.
+        // Where the billboard rotates from. Off: the whole mesh turns around its object origin. On: every
+        // vertex turns around the centre of its own quad/triangle and takes that quad's plane normal from
+        // the two baked data textures below - one texel per vertex, addressed by SV_VertexID. Bake them with
+        // Tools > BrewMonster > Bake Billboard Quad Data.
         [Toggle(_BILLBOARD_PER_VERTEX_PIVOT)] _BillboardPivot ("Pivot Per Quad/Triangle", Float) = 0
+
+        // Object-space pivot and plane normal of the quad each vertex belongs to, one texel per vertex of the
+        // mesh. RGBAFloat, point sampled, no compression, no mipmaps - the baker writes these as .asset
+        // textures with those settings, so do not re-import them differently. With nothing assigned the pivot
+        // reads as zero and the billboard falls back to the mesh origin.
+        [NoScaleOffset] _BillboardPivotTex ("Billboard Pivot (baked)", 2D) = "black" {}
+        [NoScaleOffset] _BillboardNormalTex ("Billboard Normal (baked)", 2D) = "white" {}
+        [HideInInspector] _BillboardDataSize ("Billboard Data Size", Vector) = (1, 1, 1, 1)
 
         // BlendMode options
         [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend("Src Blend Mode", Float) = 1
@@ -82,10 +90,9 @@ Shader "BrewMonster/UnlitWithShadows"
             // reads it, and _local so unused variants are stripped from builds.
             #pragma shader_feature_local_vertex _BILLBOARD_ON
 
-            // Same shape for the per-quad pivot, plus the shader model its buffer read needs:
-            // SV_VertexID and StructuredBuffer are shader model 4.5 only (D3D11, Vulkan, Metal,
-            // GLES3.1). GLES3.0 devices would lose this pass, so keep the keyword off for them or
-            // move the pivot into a vertex attribute instead of a buffer.
+            // Same shape for the per-quad pivot, plus the shader model its data read needs: SV_VertexID and a
+            // vertex-stage texture fetch put this at 4.5 here (D3D11, Vulkan, Metal, GLES3.1). Lower it to 3.5
+            // and test on the devices if you need GLES3.0 - there is no buffer in this path any more.
             #pragma shader_feature_local_vertex _BILLBOARD_PER_VERTEX_PIVOT
             #pragma target 4.5
 
@@ -97,15 +104,14 @@ Shader "BrewMonster/UnlitWithShadows"
             TEXTURE2D(_HighMap);
             SAMPLER(sampler_HighMap);
 
-            // Object-space billboard pivot per vertex, indexed by SV_VertexID and bound per renderer by
-            // BillboardPivotBinder. Only read where _BILLBOARD_PER_VERTEX_PIVOT is on, because an
-            // unbound StructuredBuffer returns undefined values rather than zero.
-            StructuredBuffer<float3> _BillboardPivotBuffer;
-
-            // Object-space plane normal of the same quad/triangle, also per vertex. It comes from the mesh
-            // winding rather than from the NORMAL stream, because a smoothed vertex normal would tilt the
-            // card basis out of the card's plane - and the projection onto that basis shrinks the card.
-            StructuredBuffer<float3> _BillboardCardNormalBuffer;
+            // Baked per-vertex billboard data: one texel per vertex, sampled in the vertex shader with a UV
+            // worked out from SV_VertexID, so nothing has to be bound per renderer and instancing keeps
+            // working. Only read where _BILLBOARD_PER_VERTEX_PIVOT is on; a material with no textures assigned
+            // keeps the mesh origin as its pivot.
+            TEXTURE2D(_BillboardPivotTex);
+            SAMPLER(sampler_BillboardPivotTex);
+            TEXTURE2D(_BillboardNormalTex);
+            SAMPLER(sampler_BillboardNormalTex);
 
             CBUFFER_START(UnityPerMaterial)
                 float4 _BaseMap_ST;
@@ -115,6 +121,7 @@ Shader "BrewMonster/UnlitWithShadows"
                 float _PWColorMode;
                 float _RenderType;
                 half _ShadowStrength;
+                float4 _BillboardDataSize;
             CBUFFER_END
 
             CBUFFER_START(DayNightCustom)
@@ -139,6 +146,16 @@ Shader "BrewMonster/UnlitWithShadows"
                 float3 normalWS : TEXCOORD2;
                 float fogCoord : TEXCOORD3;
             };
+
+            // The baked data textures hold one texel per vertex, so a vertex index reads as a grid position.
+            // _BillboardDataSize is (width, height, 1/width, 1/height), written by the baker next to the
+            // textures; adding half a texel lands on texel centres, which is where a point sampler reads.
+            float2 BillboardDataUV(uint vertexID)
+            {
+                float width = max(_BillboardDataSize.x, 1.0);
+                float2 texel = float2(fmod((float)vertexID, width), floor((float)vertexID / width));
+                return (texel + 0.5) * _BillboardDataSize.zw;
+            }
 
             Varyings vert(Attributes input)
             {
@@ -173,7 +190,7 @@ Shader "BrewMonster/UnlitWithShadows"
                 // pivot the offset used below is the plain object-space position, exactly as before.
                 float3 pivotOS = float3(0, 0, 0);
                 #ifdef _BILLBOARD_PER_VERTEX_PIVOT
-                pivotOS = _BillboardPivotBuffer[input.vertexID];
+                pivotOS = SAMPLE_TEXTURE2D_LOD(_BillboardPivotTex, sampler_BillboardPivotTex, BillboardDataUV(input.vertexID), 0).xyz;
                 #endif
 
                 float3 pivotWS = TransformObjectToWorld(pivotOS);
@@ -191,10 +208,16 @@ Shader "BrewMonster/UnlitWithShadows"
 
                 #ifdef _BILLBOARD_PER_VERTEX_PIVOT
                 // Per card: express the vertex offset inside the card's own frame and rebuild it in the
-                // billboard frame, so a tilted card keeps its shape and only its facing changes. The card's
-                // plane normal has to be the real one from the buffer: taken from a smoothed NORMAL stream
-                // it would tilt the frame out of the card's plane.
-                float3 normalOS = _BillboardCardNormalBuffer[input.vertexID];
+                // billboard frame, so a tilted card keeps its shape and only its facing changes. The plane
+                // normal comes from the baked texture rather than from the NORMAL stream: a smoothed vertex
+                // normal would tilt the frame out of the card's plane.
+                float3 normalOS = SAMPLE_TEXTURE2D_LOD(_BillboardNormalTex, sampler_BillboardNormalTex, BillboardDataUV(input.vertexID), 0).xyz;
+
+                // A vertex the baker did not cover - a bark vertex, or a material with no textures assigned -
+                // reads as zero here, so fall back to up and keep the basis below finite. Such vertices are not
+                // billboarded anyway, because the material drawing them has the keyword off.
+                normalOS = dot(normalOS, normalOS) > 1e-6 ? normalOS : float3(0, 1, 0);
+
                 float3 normalWS = normalize(TransformObjectToWorldNormal(normalOS));
 
                 // A card facing straight up or down would make the cross product below degenerate.
@@ -333,6 +356,7 @@ Shader "BrewMonster/UnlitWithShadows"
                 float _PWColorMode;
                 float _RenderType;
                 half _ShadowStrength;
+                float4 _BillboardDataSize;
             CBUFFER_END
 
             // Set by ShadowUtils.SetupShadowCasterConstantBuffer while the shadow map is rendered.

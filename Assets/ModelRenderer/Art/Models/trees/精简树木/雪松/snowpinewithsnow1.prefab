@@ -48,6 +48,14 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: -6553461977888540531, guid: a557146c9d622e74baefb4f5efa644ac, type: 3}
+      propertyPath: 'm_Materials.Array.data[1]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 73bf33739f7ff4e49b389e6a96bd5f70, type: 2}
+    - target: {fileID: -3819270655085576994, guid: a557146c9d622e74baefb4f5efa644ac, type: 3}
+      propertyPath: 'm_Materials.Array.data[1]'
+      value: 
+      objectReference: {fileID: 2100000, guid: fbc53aa0112e6488e9dcaef21fcf68c5, type: 2}
     - target: {fileID: 919132149155446097, guid: a557146c9d622e74baefb4f5efa644ac, type: 3}
       propertyPath: m_Name
       value: snowpinewithsnow1
