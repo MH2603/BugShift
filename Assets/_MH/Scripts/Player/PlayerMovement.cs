@@ -1,7 +1,9 @@
 using UnityEngine;
+using UnityEngine.Pool;
 namespace MH
 {
-    public class PlayerMovement : MonoBehaviour
+    public class PlayerMovement : MonoBehaviour, IEntityComponent
+    
     {
         #region FIELDS 
 
@@ -12,23 +14,25 @@ namespace MH
         #region PROPERTIES
 
         private CharacterController _unityChCtrl;
-        #endregion
 
-
-        #region UNITY API 
-
-        void Start()
+        public void OnInit(SceneEntity entity)
         {
             _unityChCtrl = GetComponent<CharacterController>();
         }
 
-        private void Update()
+        public void Tick(float deltaTime)
         {
-            var moveDir = PlayerInputReader.Instance.GetMove();
+            var inputDir = PlayerInputReader.Instance.GetMove();
+            Vector3 moveDir = new Vector3(inputDir.x, 0, inputDir.y);
+
             // test input
             // MHLogger.Log(moveDir.ToString());
-            _unityChCtrl.Move(moveDir * speed * Time.deltaTime);
+            _unityChCtrl.Move(moveDir * speed * deltaTime);
         }
+        #endregion
+
+
+        #region UNITY API 
 
         #endregion
 
